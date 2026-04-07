@@ -1,41 +1,24 @@
-<div align="center">
+# BrowserForge 🔨
 
-# 🔨 BrowserForge
+BrowserForge is a zero-setup, local AI IDE and Native Web Agent that runs entirely in your browser. It allows you to mount a local workspace, edit code, view documents, and leverage various flagship AI models to autonomously perform file operations right on your machine.
 
-**A zero-install AI coding IDE that runs entirely in your browser.**
+## ✨ Features
+* **Zero Backend:** Runs 100% locally in your browser using the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API).
+* **Multi-Provider AI:** Built-in support for OpenAI, Google Gemini, Anthropic Claude, xAI, Mistral, DeepSeek, local models via Ollama/LM Studio, and more.
+* **Smart File Editor:** Integrated [Monaco Editor](https://microsoft.github.io/monaco-editor/) with syntax highlighting and code formatting.
+* **Document Support:** Preview images, read Excel (`.xlsx`) files, and parse Word (`.docx`) documents natively.
+* **Voice Dictation:** Speak your prompts directly to the agent.
+* **Privacy First:** Your API keys are strictly used on the client side and never sent to a third-party server besides the AI provider.
 
-Connect any LLM — OpenAI, Gemini, Ollama, or any OpenAI-compatible API — and let an autonomous agent read, write, delete, and rename files in your local workspace. No server. No backend. No tracking.
+## 🚀 How to Use
+1. Clone the repository or simply open `index.html` in a modern browser (Chrome/Edge recommended for File System API support).
+2. Click **Mount Workspace** and select a local folder to work in.
+3. Configure your preferred **Provider Preset**, model, and API Key in the top navigation bar.
+4. Open a file from the left sidebar or prompt the agent in the bottom chat area to create, modify, or delete files autonomously!
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-![Single File](https://img.shields.io/badge/Size-Single%20HTML%20File-orange)
-
-[**→ Try it now (GitHub Pages)**](#getting-started) · [Report Bug](../../issues) · [Request Feature](../../issues)
-
-</div>
-
----
-
-## ✨ What is this?
-
-BrowserForge is a **single HTML file** that turns your browser into a full AI-powered IDE:
-
-- 📂 **Mount any local folder** via the File System Access API
-- 🤖 **Connect any LLM** (Gemini, GPT-4o, Ollama, LM Studio, etc.)
-- ✍️ **Autonomous file operations** — the AI writes, modifies, deletes & renames files
-- 📊 **Excel & Word support** — read/modify `.xlsx` and `.docx` files
-- 🖼️ **Vision support** — send images to multimodal models
-- 🎤 **Voice input** — dictate prompts in German/English
-- 🔒 **100% client-side** — nothing leaves your browser unless you send it to an API
-
-No npm. No build step. No Docker. Just open the HTML file.
-
----
-
-## 🚀 Getting Started
-
-### Option 1: Just open it
-```bash
-git clone https://github.com/YOUR_USERNAME/BrowserForge.git
-cd BrowserForge
-# Open index.html in Chrome/Edge (Firefox doesn't support File System Access API)
+## 🛠️ Tech Stack
+* HTML5 / Vanilla JavaScript
+* [Tailwind CSS](https://tailwindcss.com/)
+* [Monaco Editor](https://microsoft.github.io/monaco-editor/)
+* [Marked.js](https://marked.js.org/)
+* SheetJS (XLSX) & Mammoth.js (DOCX)
