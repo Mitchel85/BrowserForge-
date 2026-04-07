@@ -1,0 +1,1220 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrowserForge - Local AI IDE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+
+    <style>
+        body { overflow: hidden; }
+        .file-item:hover { background-color: #374151; cursor: pointer; }
+        .selected-file { background-color: #2563eb !important; color: white; }
+        .selected-file i { color: #bfdbfe !important; }
+        #monaco-editor { width: 100%; height: 100%; }
+        .prose pre { background-color: #1f2937 !important; color: #e5e7eb !important; border: 1px solid #374151; }
+        .spinner { border: 3px solid #374151; border-top: 3px solid #3b82f6; border-radius: 50%; width: 18px; height: 18px; animation: spin 0.8s linear infinite; display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse-border { 0%, 100% { border-color: #dc2626; } 50% { border-color: #991b1b; } }
+        .recording-pulse { animation: pulse-border 1s ease-in-out infinite; border: 2px solid #dc2626; }
+        .drop-overlay { display: none; position: absolute; inset: 0; background: rgba(37,99,235,0.15); border: 3px dashed #3b82f6; z-index: 100; align-items: center; justify-content: center; font-size: 1.2rem; color: #93c5fd; pointer-events: none; }
+        .drop-overlay.active { display: flex; }
+        #chat-output .msg-user { border-left: 3px solid #3b82f6; padding-left: 8px; }
+        #chat-output .msg-ai { border-left: 3px solid #a855f7; padding-left: 8px; }
+        #chat-output .msg-system { border-left: 3px solid #22c55e; padding-left: 8px; }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 h-screen flex flex-col font-sans text-sm">
+
+    <header class="bg-gray-900 border-b border-gray-800 p-3 flex flex-col gap-3 shrink-0 z-50">
+        <div class="flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <h1 class="text-xl font-bold text-blue-400"><i class="fa-solid fa-hammer mr-2 text-xl"></i>BrowserForge</h1>
+                <span class="bg-blue-900 text-blue-200 text-xs px-2 py-0.5 rounded-full font-mono">Native Web Agent v2</span>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="createNewFile()" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-1.5 px-3 rounded text-xs transition" title="Create new file">
+                    <i class="fa-solid fa-file-circle-plus mr-1"></i> New File
+                </button>
+                <button onclick="mountFolder()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-4 rounded text-xs transition shadow-lg">
+                    <i class="fa-regular fa-folder-open mr-1"></i> Mount Workspace
+                </button>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap gap-3 items-end bg-gray-950 p-3 rounded border border-gray-800">
+            <div class="flex-1 min-w-[150px]">
+                <label class="block text-[10px] text-gray-500 uppercase font-bold mb-1">Provider Preset</label>
+                <select id="api-provider" onchange="updateApiDefaults()" class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 text-xs text-white">
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="anthropic">Anthropic Claude</option>
+                    <option value="xai">xAI Grok</option>
+                    <option value="mistral">Mistral AI</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="qwen">Qwen (Alibaba)</option>
+                    <option value="kimi">Kimi / Moonshot</option>
+                    <option value="groq">Groq</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="ollama">Ollama (Local)</option>
+                    <option value="lmstudio">LM Studio (Local)</option>
+                    <option value="custom">Custom (OpenAI Compatible)</option>
+                </select>
+            </div>
+            <div class="flex-[2] min-w-[200px]">
+                <label class="block text-[10px] text-gray-500 uppercase font-bold mb-1">Base URL</label>
+                <input type="text" id="api-baseurl" class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 text-xs text-white font-mono">
+            </div>
+            <div class="flex-[1.5] min-w-[200px]">
+                <label class="block text-[10px] text-gray-500 uppercase font-bold mb-1">Model</label>
+                <div class="flex gap-1">
+                    <select id="api-model-select" onchange="onModelSelectChange()" class="flex-1 bg-gray-800 border border-gray-700 rounded p-1.5 text-xs text-white font-mono">
+                    </select>
+                    <input type="text" id="api-model-custom" placeholder="type custom model…" class="flex-1 bg-gray-800 border border-gray-700 rounded p-1.5 text-xs text-white font-mono hidden">
+                    <button onclick="toggleCustomModelInput()" class="bg-gray-700 hover:bg-gray-600 text-gray-400 hover:text-white px-2 rounded text-[10px] transition" title="Toggle custom model input">
+                        <i class="fa-solid fa-pen"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="flex-[1.5] min-w-[150px]">
+                <label class="block text-[10px] text-gray-500 uppercase font-bold mb-1">API Key (optional)</label>
+                <input type="password" id="api-key" placeholder="Bearer / Key" class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 text-xs text-white font-mono">
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <aside class="w-60 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
+            <div class="p-2.5 bg-gray-950 border-b border-gray-800 text-xs font-bold uppercase text-gray-500 tracking-wider flex justify-between items-center">
+                <span>FILES</span>
+                <div class="flex gap-2">
+                    <button onclick="createNewFile()" title="New File"><i class="fa-solid fa-plus hover:text-white transition text-[10px]"></i></button>
+                    <button onclick="refreshFileTree()" title="Refresh"><i class="fa-solid fa-sync hover:text-white transition text-[10px]"></i></button>
+                </div>
+            </div>
+            <div id="file-tree" class="flex-1 overflow-y-auto p-1.5 space-y-0.5 text-gray-400">
+                <div class="text-center text-gray-600 mt-10 italic">No folder loaded.</div>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col min-w-0 bg-[#1e1e1e] relative">
+            <div class="drop-overlay" id="drop-overlay"><i class="fa-solid fa-cloud-arrow-up mr-2"></i> Drop file here</div>
+
+            <div id="main-overlay" class="absolute inset-0 flex items-center justify-center z-10 bg-gray-950/90 backdrop-blur-sm pointer-events-none text-center">
+                <div>
+                    <i class="fa-solid fa-code text-gray-700 text-5xl mb-4"></i>
+                    <p class="text-gray-600 font-mono text-xs">Select a file in the explorer<br>Code, Image, Word, or Excel</p>
+                </div>
+            </div>
+
+            <div id="editor-wrapper" class="w-full h-full hidden flex flex-col">
+                <div id="monaco-editor" class="w-full flex-1"></div>
+                <div id="status-bar" class="bg-gray-900 border-t border-gray-800 px-3 py-1 text-[10px] text-gray-500 flex justify-between items-center">
+                    <span id="status-file">No file</span>
+                    <div class="flex gap-4">
+                        <span id="status-lines">Lines: 0</span>
+                        <span id="status-size">Size: 0 B</span>
+                        <span id="status-lang">Language: -</span>
+                        <span id="status-saved" class="text-green-600">● Saved</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="image-preview-container" class="w-full h-full items-center justify-center p-8 hidden">
+                <img id="image-preview-element" class="max-w-full max-h-full rounded shadow-2xl border border-gray-700">
+            </div>
+            <div id="office-data-container" class="w-full h-full overflow-auto p-4 font-mono text-xs text-gray-400 hidden"></div>
+        </main>
+    </div>
+
+    <div class="h-1/3 bg-gray-950 border-t border-gray-800 flex flex-col shrink-0 z-50">
+        <div class="flex justify-between items-center px-4 py-1.5 bg-gray-900 border-b border-gray-800">
+            <div class="flex items-center gap-3">
+                <span class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Agent Chat</span>
+                <span id="context-counter" class="text-[10px] text-gray-600 font-mono"></span>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="exportChat()" class="text-gray-600 hover:text-white text-[10px] transition" title="Export chat"><i class="fa-solid fa-download"></i></button>
+                <button onclick="clearChat()" class="text-gray-600 hover:text-white text-[10px] transition" title="Clear chat"><i class="fa-solid fa-trash"></i></button>
+            </div>
+        </div>
+        <div id="chat-output" class="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-gray-300">
+            <div class="msg-system text-green-500 text-xs">System ready. Configure your API above and mount a workspace.</div>
+        </div>
+        <div class="p-3 bg-gray-900 border-t border-gray-800 flex gap-2.5 items-center">
+            <button id="mic-btn" onclick="toggleDictation()" class="bg-gray-800 hover:bg-red-600/50 text-white p-3.5 rounded-full transition" title="Voice input (Toggle)">
+                <i class="fa-solid fa-microphone"></i>
+            </button>
+            <input type="text" id="user-prompt" placeholder="Send an instruction to the agent (Enter or Ctrl+Enter)..." class="flex-1 bg-gray-800 border border-gray-700 rounded p-3 text-white focus:outline-none focus:border-blue-500 font-mono text-xs">
+            <button id="run-btn" onclick="executeAgent()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded text-xs transition flex items-center gap-2">
+                <i class="fa-solid fa-rocket"></i> <span>Run</span>
+            </button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
+    <script>
+        // =========================================================
+        //  GLOBAL VARIABLES
+        // =========================================================
+        let dirHandle = null;
+        let fileHandles = new Map();
+        let editor;
+        let currentActiveFilePath = null;
+        let currentBase64Image = null;
+        let currentExcelJson = null;
+        let currentDocxText = null;
+        let conversationHistory = [];
+        let isAgentRunning = false;
+        let recognition = null;
+        let isRecording = false;
+        let useCustomModelInput = false;
+
+        // =========================================================
+        //  PROVIDER CONFIGURATION — Flagship Models (April 2026)
+        // =========================================================
+        const PROVIDER_CONFIG = {
+            openai: {
+                url: 'https://api.openai.com/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'gpt-5.4',        label: '⭐ GPT-5.4 (Flagship)' },
+                    { value: 'gpt-5.4-mini',    label: 'GPT-5.4 Mini' },
+                    { value: 'gpt-4.1',         label: 'GPT-4.1' },
+                    { value: 'gpt-4.1-mini',    label: 'GPT-4.1 Mini' },
+                    { value: 'gpt-4.1-nano',    label: 'GPT-4.1 Nano' },
+                    { value: 'o4-mini',          label: 'o4-mini (Reasoning)' },
+                    { value: 'o3',               label: 'o3 (Reasoning)' },
+                    { value: 'o3-mini',          label: 'o3-mini (Reasoning)' },
+                    { value: 'gpt-4o',           label: 'GPT-4o (Legacy)' },
+                ]
+            },
+            gemini: {
+                url: 'https://generativelanguage.googleapis.com/v1beta',
+                apiStyle: 'gemini',
+                models: [
+                    { value: 'gemini-3.1-pro-preview',  label: '⭐ Gemini 3.1 Pro (Flagship)' },
+                    { value: 'gemini-3.1-flash-preview', label: 'Gemini 3.1 Flash' },
+                    { value: 'gemini-2.5-pro-preview-05-06', label: 'Gemini 2.5 Pro' },
+                    { value: 'gemini-2.5-flash-preview-04-17', label: 'Gemini 2.5 Flash' },
+                    { value: 'gemini-2.0-flash',         label: 'Gemini 2.0 Flash' },
+                    { value: 'gemini-1.5-pro',           label: 'Gemini 1.5 Pro (Legacy)' },
+                ]
+            },
+            anthropic: {
+                url: 'https://api.anthropic.com/v1',
+                apiStyle: 'anthropic',
+                models: [
+                    { value: 'claude-opus-4-20250514',     label: '⭐ Claude Opus 4' },
+                    { value: 'claude-sonnet-4-20250514',   label: 'Claude Sonnet 4' },
+                    { value: 'claude-3-7-sonnet-20250219', label: 'Claude 3.7 Sonnet' },
+                    { value: 'claude-3-5-haiku-20241022',  label: 'Claude 3.5 Haiku' },
+                ]
+            },
+            xai: {
+                url: 'https://api.x.ai/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'grok-4',          label: '⭐ Grok 4 (Flagship)' },
+                    { value: 'grok-4-mini',     label: 'Grok 4 Mini' },
+                    { value: 'grok-3',          label: 'Grok 3' },
+                    { value: 'grok-3-mini',     label: 'Grok 3 Mini' },
+                ]
+            },
+            mistral: {
+                url: 'https://api.mistral.ai/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'mistral-large-3',     label: '⭐ Mistral Large 3 (Flagship)' },
+                    { value: 'mistral-large-latest', label: 'Mistral Large (Latest Alias)' },
+                    { value: 'mistral-medium-latest', label: 'Mistral Medium' },
+                    { value: 'mistral-small-latest', label: 'Mistral Small' },
+                    { value: 'codestral-latest',     label: 'Codestral' },
+                ]
+            },
+            deepseek: {
+                url: 'https://api.deepseek.com/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'deepseek-v3.2',    label: '⭐ DeepSeek-V3.2 (Flagship)' },
+                    { value: 'deepseek-chat',     label: 'DeepSeek Chat (V3 Alias)' },
+                    { value: 'deepseek-reasoner', label: 'DeepSeek-R1 (Reasoner)' },
+                ]
+            },
+            qwen: {
+                url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'qwen3.5',          label: '⭐ Qwen 3.5 (Flagship)' },
+                    { value: 'qwen3',             label: 'Qwen 3' },
+                    { value: 'qwen-plus',         label: 'Qwen Plus' },
+                    { value: 'qwen-turbo',        label: 'Qwen Turbo' },
+                    { value: 'qwen-coder-plus',   label: 'Qwen Coder Plus' },
+                ]
+            },
+            kimi: {
+                url: 'https://api.moonshot.cn/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'kimi-k2.5',        label: '⭐ Kimi K2.5 (Flagship)' },
+                    { value: 'kimi-k2',           label: 'Kimi K2' },
+                    { value: 'moonshot-v1-128k',  label: 'Moonshot V1 128K' },
+                ]
+            },
+            groq: {
+                url: 'https://api.groq.com/openai/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'llama-3.3-70b-versatile',          label: 'Llama 3.3 70B' },
+                    { value: 'deepseek-r1-distill-llama-70b',    label: 'DeepSeek R1 Distill 70B' },
+                    { value: 'gemma2-9b-it',                     label: 'Gemma 2 9B' },
+                    { value: 'mixtral-8x7b-32768',               label: 'Mixtral 8x7B' },
+                    { value: 'llama-3.1-8b-instant',             label: 'Llama 3.1 8B Instant' },
+                ]
+            },
+            openrouter: {
+                url: 'https://openrouter.ai/api/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'openai/gpt-5.4',              label: '⭐ GPT-5.4 via OpenRouter' },
+                    { value: 'google/gemini-3.1-pro-preview', label: '⭐ Gemini 3.1 Pro' },
+                    { value: 'x-ai/grok-4',                 label: '⭐ Grok 4' },
+                    { value: 'anthropic/claude-opus-4',      label: '⭐ Claude Opus 4' },
+                    { value: 'anthropic/claude-sonnet-4',    label: 'Claude Sonnet 4' },
+                    { value: 'mistralai/mistral-large-3',    label: '⭐ Mistral Large 3' },
+                    { value: 'deepseek/deepseek-v3.2',      label: '⭐ DeepSeek V3.2' },
+                    { value: 'qwen/qwen3.5',                label: '⭐ Qwen 3.5' },
+                    { value: 'moonshotai/kimi-k2.5',         label: '⭐ Kimi K2.5' },
+                    { value: 'deepseek/deepseek-r1',         label: 'DeepSeek R1' },
+                ]
+            },
+            ollama: {
+                url: 'http://localhost:11434',
+                apiStyle: 'ollama',
+                models: [
+                    { value: 'llama3.3',              label: 'Llama 3.3' },
+                    { value: 'qwen2.5-coder:14b',    label: 'Qwen 2.5 Coder 14B' },
+                    { value: 'deepseek-r1:14b',      label: 'DeepSeek R1 14B' },
+                    { value: 'gemma2:9b',             label: 'Gemma 2 9B' },
+                    { value: 'codellama:13b',         label: 'Code Llama 13B' },
+                    { value: 'mistral',               label: 'Mistral 7B' },
+                    { value: 'phi3',                  label: 'Phi-3' },
+                ]
+            },
+            lmstudio: {
+                url: 'http://localhost:1234/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'local-model', label: 'Loaded Model (auto-detect)' },
+                ]
+            },
+            custom: {
+                url: 'http://localhost:8080/v1',
+                apiStyle: 'openai',
+                models: [
+                    { value: 'custom-model', label: 'Custom Model' },
+                ]
+            },
+        };
+
+        // =========================================================
+        //  INITIALIZATION
+        // =========================================================
+        window.onload = () => {
+            updateApiDefaults();
+            setupKeyboardShortcuts();
+            setupDragAndDrop();
+        };
+
+        function setupKeyboardShortcuts() {
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'Enter') {
+                    e.preventDefault();
+                    executeAgent();
+                }
+                if (e.ctrlKey && e.key === 's') {
+                    e.preventDefault();
+                    saveCurrentTextFile();
+                    showSavedStatus();
+                }
+            });
+            document.getElementById('user-prompt').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) executeAgent();
+            });
+        }
+
+        function setupDragAndDrop() {
+            const main = document.querySelector('main');
+            const overlay = document.getElementById('drop-overlay');
+            let dragCounter = 0;
+
+            main.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; overlay.classList.add('active'); });
+            main.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if (dragCounter === 0) overlay.classList.remove('active'); });
+            main.addEventListener('dragover', (e) => e.preventDefault());
+            main.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                dragCounter = 0;
+                overlay.classList.remove('active');
+                if (!dirHandle) { alert('Please mount a workspace first!'); return; }
+                for (const item of e.dataTransfer.files) {
+                    try {
+                        const handle = await dirHandle.getFileHandle(item.name, { create: true });
+                        const writable = await handle.createWritable();
+                        await writable.write(item);
+                        await writable.close();
+                        appendToChat('System', `✓ File created via drag & drop: ${item.name}`, true);
+                    } catch (err) { appendToChat('System (Error)', `Drop failed: ${err.message}`, true); }
+                }
+                await refreshFileTree();
+            });
+        }
+
+        // =========================================================
+        //  API PROVIDER DEFAULTS
+        // =========================================================
+        function updateApiDefaults() {
+            const provider = document.getElementById('api-provider').value;
+            const baseUrlInput = document.getElementById('api-baseurl');
+            const modelSelect = document.getElementById('api-model-select');
+
+            const config = PROVIDER_CONFIG[provider] || PROVIDER_CONFIG.custom;
+
+            baseUrlInput.value = config.url;
+
+            // Populate model dropdown
+            modelSelect.innerHTML = '';
+            for (const m of config.models) {
+                const opt = document.createElement('option');
+                opt.value = m.value;
+                opt.textContent = m.label;
+                modelSelect.appendChild(opt);
+            }
+
+            // Reset custom input if visible
+            if (useCustomModelInput) {
+                document.getElementById('api-model-custom').value = config.models[0]?.value || '';
+            }
+        }
+
+        function getSelectedModel() {
+            if (useCustomModelInput) {
+                const custom = document.getElementById('api-model-custom').value.trim();
+                return custom || document.getElementById('api-model-select').value;
+            }
+            return document.getElementById('api-model-select').value;
+        }
+
+        function onModelSelectChange() { /* value read via getSelectedModel() */ }
+
+        function toggleCustomModelInput() {
+            useCustomModelInput = !useCustomModelInput;
+            const selectEl = document.getElementById('api-model-select');
+            const customEl = document.getElementById('api-model-custom');
+            if (useCustomModelInput) {
+                selectEl.classList.add('hidden');
+                customEl.classList.remove('hidden');
+                customEl.value = selectEl.value;
+                customEl.focus();
+            } else {
+                selectEl.classList.remove('hidden');
+                customEl.classList.add('hidden');
+            }
+        }
+
+        function getApiStyle() {
+            const provider = document.getElementById('api-provider').value;
+            return (PROVIDER_CONFIG[provider] || PROVIDER_CONFIG.custom).apiStyle;
+        }
+
+        // =========================================================
+        //  MONACO EDITOR
+        // =========================================================
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
+        require(['vs/editor/editor.main'], function () {
+            editor = monaco.editor.create(document.getElementById('monaco-editor'), {
+                value: '', theme: 'vs-dark', automaticLayout: true,
+                minimap: { enabled: true }, fontSize: 11,
+                wordWrap: 'on', smoothScrolling: true,
+                cursorBlinking: 'smooth', cursorSmoothCaretAnimation: 'on',
+                bracketPairColorization: { enabled: true },
+            });
+            editor.onDidChangeModelContent(() => {
+                updateStatusBar();
+                markUnsaved();
+                debouncedSave();
+            });
+        });
+
+        let saveTimeout;
+        function debouncedSave() {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                if (currentActiveFilePath && !isNonTextFile(currentActiveFilePath)) {
+                    saveCurrentTextFile();
+                    showSavedStatus();
+                }
+            }, 1500);
+        }
+
+        function updateStatusBar() {
+            if (!editor) return;
+            const model = editor.getModel();
+            if (!model) return;
+            document.getElementById('status-lines').textContent = `Lines: ${model.getLineCount()}`;
+            const bytes = new Blob([editor.getValue()]).size;
+            document.getElementById('status-size').textContent = `Size: ${formatBytes(bytes)}`;
+        }
+
+        function markUnsaved() {
+            const el = document.getElementById('status-saved');
+            el.textContent = '● Unsaved';
+            el.className = 'text-yellow-500';
+        }
+
+        function showSavedStatus() {
+            const el = document.getElementById('status-saved');
+            el.textContent = '● Saved';
+            el.className = 'text-green-600';
+        }
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1048576).toFixed(1) + ' MB';
+        }
+
+        // =========================================================
+        //  FILESYSTEM LOGIC
+        // =========================================================
+        async function mountFolder() {
+            try {
+                dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                appendToChat('System', `✓ Workspace mounted: <strong>${dirHandle.name}</strong>`, true);
+                await refreshFileTree();
+            } catch (error) {
+                if (error.name !== 'AbortError') console.error(error);
+            }
+        }
+
+        async function refreshFileTree() {
+            if (!dirHandle) return;
+            const treeContainer = document.getElementById('file-tree');
+            treeContainer.innerHTML = '';
+            fileHandles.clear();
+            await buildTree(dirHandle, '', treeContainer);
+        }
+
+        const ICON_MAP = {
+            'js':   '<i class="fa-brands fa-js text-yellow-400"></i>',
+            'ts':   '<i class="fa-brands fa-js text-blue-400"></i>',
+            'jsx':  '<i class="fa-brands fa-react text-cyan-400"></i>',
+            'tsx':  '<i class="fa-brands fa-react text-cyan-400"></i>',
+            'py':   '<i class="fa-brands fa-python text-green-400"></i>',
+            'html': '<i class="fa-brands fa-html5 text-orange-400"></i>',
+            'css':  '<i class="fa-brands fa-css3-alt text-blue-400"></i>',
+            'json': '<i class="fa-solid fa-brackets-curly text-yellow-300"></i>',
+            'md':   '<i class="fa-brands fa-markdown text-gray-300"></i>',
+            'svg':  '<i class="fa-regular fa-image text-pink-400"></i>',
+            'png':  '<i class="fa-regular fa-image text-purple-400"></i>',
+            'jpg':  '<i class="fa-regular fa-image text-purple-400"></i>',
+            'jpeg': '<i class="fa-regular fa-image text-purple-400"></i>',
+            'gif':  '<i class="fa-regular fa-image text-purple-400"></i>',
+            'webp': '<i class="fa-regular fa-image text-purple-400"></i>',
+            'xlsx': '<i class="fa-regular fa-file-excel text-green-400"></i>',
+            'xls':  '<i class="fa-regular fa-file-excel text-green-400"></i>',
+            'docx': '<i class="fa-regular fa-file-word text-blue-400"></i>',
+            'pdf':  '<i class="fa-regular fa-file-pdf text-red-400"></i>',
+            'sh':   '<i class="fa-solid fa-terminal text-green-300"></i>',
+            'yml':  '<i class="fa-solid fa-gear text-pink-300"></i>',
+            'yaml': '<i class="fa-solid fa-gear text-pink-300"></i>',
+            'xml':  '<i class="fa-solid fa-code text-orange-300"></i>',
+            'sql':  '<i class="fa-solid fa-database text-blue-300"></i>',
+            'env':  '<i class="fa-solid fa-lock text-yellow-600"></i>',
+            'gitignore': '<i class="fa-brands fa-git-alt text-orange-500"></i>',
+        };
+
+        function getFileIcon(name) {
+            const ext = name.split('.').pop().toLowerCase();
+            if (ICON_MAP[name.replace('.', '')]) return ICON_MAP[name.replace('.', '')];
+            return ICON_MAP[ext] || '<i class="fa-regular fa-file text-gray-500"></i>';
+        }
+
+        const IGNORED_DIRS = new Set(['node_modules', '.git', '__pycache__', '.next', 'dist', '.vscode']);
+
+        async function buildTree(handle, currentPath, container) {
+            const entries = [];
+            for await (const entry of handle.values()) {
+                if (entry.name.startsWith('.') && entry.name !== '.env' && entry.name !== '.gitignore') continue;
+                if (entry.kind === 'directory' && IGNORED_DIRS.has(entry.name)) continue;
+                entries.push(entry);
+            }
+            entries.sort((a, b) => {
+                if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            for (const entry of entries) {
+                const fullPath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'file-item py-1 px-2 rounded flex items-center gap-2 truncate text-xs';
+                itemDiv.dataset.path = fullPath;
+
+                if (entry.kind === 'file') {
+                    const icon = getFileIcon(entry.name);
+                    itemDiv.innerHTML = `${icon} <span class="truncate">${entry.name}</span>`;
+                    fileHandles.set(fullPath, entry);
+                    itemDiv.onclick = (e) => openFile(fullPath, e);
+                    container.appendChild(itemDiv);
+                } else {
+                    const chevron = '<i class="fa-solid fa-chevron-right text-[8px] text-gray-600 transition-transform folder-chevron"></i>';
+                    itemDiv.innerHTML = `${chevron} <i class="fa-solid fa-folder text-yellow-500"></i> <span class="truncate">${entry.name}</span>`;
+                    const subContainer = document.createElement('div');
+                    subContainer.className = 'pl-3.5 border-l border-gray-800 ml-1.5 mt-0.5 hidden';
+                    itemDiv.onclick = () => {
+                        subContainer.classList.toggle('hidden');
+                        const chev = itemDiv.querySelector('.folder-chevron');
+                        chev.style.transform = subContainer.classList.contains('hidden') ? '' : 'rotate(90deg)';
+                    };
+                    container.appendChild(itemDiv);
+                    container.appendChild(subContainer);
+                    await buildTree(entry, fullPath, subContainer);
+                }
+            }
+        }
+
+        const NON_TEXT_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.xlsx', '.xls', '.docx', '.pdf'];
+        function isNonTextFile(path) { return NON_TEXT_EXTS.some(ext => path.toLowerCase().endsWith(ext)); }
+        const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg'];
+
+        async function openFile(path, event) {
+            if (currentActiveFilePath === path) return;
+            const ext = path.split('.').pop().toLowerCase();
+
+            document.getElementById('main-overlay').style.display = 'none';
+            document.getElementById('office-data-container').classList.add('hidden');
+            document.getElementById('image-preview-container').classList.add('hidden');
+            document.querySelectorAll('.file-item').forEach(el => el.classList.remove('selected-file'));
+            if (event && event.currentTarget) event.currentTarget.classList.add('selected-file');
+
+            currentActiveFilePath = path;
+            currentBase64Image = null;
+            currentExcelJson = null;
+            currentDocxText = null;
+
+            const handle = fileHandles.get(path);
+            if (!handle) { appendToChat('System (Error)', `File handle not found: ${path}`, true); return; }
+            const file = await handle.getFile();
+
+            if (IMAGE_EXTS.includes(ext)) {
+                hideCodeEditor();
+                document.getElementById('image-preview-container').classList.remove('hidden');
+                document.getElementById('image-preview-container').style.display = 'flex';
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    document.getElementById('image-preview-element').src = e.target.result;
+                    currentBase64Image = e.target.result.split(',')[1];
+                };
+                reader.readAsDataURL(file);
+                appendToChat('System', `🖼️ Image loaded: ${path} (${formatBytes(file.size)})`, true);
+
+            } else if (['xlsx', 'xls'].includes(ext)) {
+                hideCodeEditor();
+                document.getElementById('office-data-container').classList.remove('hidden');
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                        currentExcelJson = {};
+                        let htmlOutput = '<div class="space-y-4">';
+                        for (const sheetName of workbook.SheetNames) {
+                            const sheet = workbook.Sheets[sheetName];
+                            currentExcelJson[sheetName] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                            const htmlTable = XLSX.utils.sheet_to_html(sheet);
+                            htmlOutput += `<h3 class="text-blue-400 font-bold text-sm mb-1">📊 ${sheetName}</h3>`;
+                            htmlOutput += `<div class="overflow-auto border border-gray-700 rounded">${htmlTable}</div>`;
+                        }
+                        htmlOutput += '</div>';
+                        document.getElementById('office-data-container').innerHTML = htmlOutput;
+                        document.querySelectorAll('#office-data-container table').forEach(t => {
+                            t.className = 'text-xs text-gray-300 border-collapse w-full';
+                            t.querySelectorAll('td, th').forEach(c => { c.className = 'border border-gray-700 px-2 py-1'; });
+                        });
+                    } catch (err) {
+                        document.getElementById('office-data-container').innerHTML = `<div class="text-red-400">Error reading Excel file: ${err.message}</div>`;
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+                appendToChat('System', `📊 Excel loaded: ${path}`, true);
+
+            } else if (ext === 'docx') {
+                hideCodeEditor();
+                document.getElementById('office-data-container').classList.remove('hidden');
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const result = await mammoth.convertToHtml({ arrayBuffer: e.target.result });
+                        currentDocxText = (await mammoth.extractRawText({ arrayBuffer: e.target.result })).value;
+                        document.getElementById('office-data-container').innerHTML = `
+                            <h3 class="text-blue-400 font-bold text-sm mb-2">📝 Word Document</h3>
+                            <div class="prose prose-invert prose-sm max-w-none bg-gray-900 p-4 rounded border border-gray-700">${result.value}</div>`;
+                    } catch (err) {
+                        document.getElementById('office-data-container').innerHTML = `<div class="text-red-400">Error reading Word file: ${err.message}</div>`;
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+                appendToChat('System', `📝 Word document loaded: ${path}`, true);
+
+            } else {
+                showCodeEditor();
+                const text = await file.text();
+                const langMap = {
+                    'js': 'javascript', 'jsx': 'javascript', 'ts': 'typescript', 'tsx': 'typescript',
+                    'html': 'html', 'htm': 'html', 'css': 'css', 'scss': 'scss', 'less': 'less',
+                    'json': 'json', 'md': 'markdown', 'py': 'python', 'sh': 'shell',
+                    'yml': 'yaml', 'yaml': 'yaml', 'xml': 'xml', 'svg': 'xml', 'sql': 'sql',
+                    'rs': 'rust', 'go': 'go', 'java': 'java', 'c': 'c', 'cpp': 'cpp',
+                    'rb': 'ruby', 'php': 'php', 'swift': 'swift', 'kt': 'kotlin',
+                    'toml': 'ini', 'ini': 'ini', 'env': 'ini',
+                };
+                const lang = langMap[ext] || 'plaintext';
+                monaco.editor.setModelLanguage(editor.getModel(), lang);
+                editor.setValue(text);
+                editor.revealLine(1);
+
+                document.getElementById('status-file').textContent = path;
+                document.getElementById('status-lang').textContent = `Language: ${lang}`;
+                updateStatusBar();
+                showSavedStatus();
+            }
+        }
+
+        function showCodeEditor() {
+            document.getElementById('editor-wrapper').classList.remove('hidden');
+            document.getElementById('image-preview-container').classList.add('hidden');
+            document.getElementById('image-preview-container').style.display = '';
+        }
+        function hideCodeEditor() {
+            document.getElementById('editor-wrapper').classList.add('hidden');
+        }
+
+        async function saveCurrentTextFile() {
+            if (!currentActiveFilePath || isNonTextFile(currentActiveFilePath)) return;
+            try {
+                const handle = fileHandles.get(currentActiveFilePath);
+                if (!handle) return;
+                const writable = await handle.createWritable();
+                await writable.write(editor.getValue());
+                await writable.close();
+            } catch (err) {
+                appendToChat('System (Error)', `Save failed: ${err.message}`, true);
+            }
+        }
+
+        async function getDeepFileHandle(rootHandle, filePath, create = false) {
+            const parts = filePath.split('/');
+            let currentDirHandle = rootHandle;
+            for (let i = 0; i < parts.length - 1; i++) {
+                currentDirHandle = await currentDirHandle.getDirectoryHandle(parts[i], { create: create });
+            }
+            return await currentDirHandle.getFileHandle(parts[parts.length - 1], { create: create });
+        }
+
+        async function getDeepDirHandle(rootHandle, dirPath, create = false) {
+            const parts = dirPath.split('/');
+            let current = rootHandle;
+            for (const part of parts) {
+                current = await current.getDirectoryHandle(part, { create: create });
+            }
+            return current;
+        }
+
+        async function createNewFile() {
+            if (!dirHandle) { alert('Please mount a workspace first!'); return; }
+            const name = prompt('Filename (e.g., "src/utils/helper.js"):');
+            if (!name || !name.trim()) return;
+            try {
+                const handle = await getDeepFileHandle(dirHandle, name.trim(), true);
+                const writable = await handle.createWritable();
+                await writable.write('');
+                await writable.close();
+                appendToChat('System', `✓ File created: ${name.trim()}`, true);
+                await refreshFileTree();
+            } catch (err) {
+                appendToChat('System (Error)', `Failed to create file: ${err.message}`, true);
+            }
+        }
+
+        // =========================================================
+        //  VOICE / DICTATION
+        // =========================================================
+        function toggleDictation() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) { alert("Speech Recognition API not supported in this browser."); return; }
+
+            const btn = document.getElementById('mic-btn');
+
+            if (isRecording && recognition) {
+                recognition.stop();
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.continuous = false;
+
+            recognition.onstart = () => {
+                isRecording = true;
+                btn.classList.add('bg-red-600', 'recording-pulse');
+                btn.title = 'Stop recording';
+            };
+
+            recognition.onresult = (e) => {
+                const transcript = e.results[0][0].transcript;
+                document.getElementById('user-prompt').value += transcript + ' ';
+            };
+
+            recognition.onerror = (e) => {
+                console.error('Speech error:', e.error);
+                if (e.error !== 'no-speech') appendToChat('System', `🎤 Voice error: ${e.error}`, true);
+            };
+
+            recognition.onend = () => {
+                isRecording = false;
+                btn.classList.remove('bg-red-600', 'recording-pulse');
+                btn.title = 'Voice input (Toggle)';
+            };
+
+            recognition.start();
+        }
+
+        // =========================================================
+        //  CHAT UI
+        // =========================================================
+        function appendToChat(sender, message, isSystem = false) {
+            const chatOutput = document.getElementById('chat-output');
+            const div = document.createElement('div');
+            div.className = `mb-3 pb-2 border-b border-gray-900 ${sender === 'User' ? 'msg-user' : isSystem ? 'msg-system' : 'msg-ai'}`;
+
+            const color = sender === 'User' ? 'text-blue-400' : (isSystem ? 'text-green-500' : 'text-purple-400');
+            const content = sender === 'BrowserForge' ? marked.parse(message) : message;
+            const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            div.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <span class="${color} font-bold text-xs uppercase tracking-wider">${sender}</span>
+                    <span class="text-gray-700 text-[9px] font-mono">${time}</span>
+                </div>
+                <div class="text-gray-300 prose prose-invert prose-xs max-w-none">${content}</div>`;
+            chatOutput.appendChild(div);
+            chatOutput.scrollTop = chatOutput.scrollHeight;
+        }
+
+        function clearChat() {
+            if (!confirm('Really clear chat history?')) return;
+            document.getElementById('chat-output').innerHTML = '';
+            conversationHistory = [];
+            appendToChat('System', 'Chat cleared. New context.', true);
+        }
+
+        function exportChat() {
+            const chatEls = document.querySelectorAll('#chat-output > div');
+            let md = `# BrowserForge Chat Export\n_${new Date().toLocaleString('en-US')}_\n\n---\n\n`;
+            chatEls.forEach(el => {
+                const sender = el.querySelector('span')?.textContent || 'Unknown';
+                const content = el.querySelector('.prose')?.textContent || '';
+                md += `## ${sender}\n${content}\n\n---\n\n`;
+            });
+            const blob = new Blob([md], { type: 'text/markdown' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `browserforge-chat-${Date.now()}.md`;
+            a.click();
+        }
+
+        // =========================================================
+        //  CORE: UNIVERSAL API ROUTER
+        // =========================================================
+        function buildSystemPrompt(userPrompt) {
+            let context = `You are BrowserForge, an autonomous developer agent operating directly in the browser.
+You can read, write, delete, and rename files.
+
+Current Workspace: "${dirHandle?.name || 'None'}"
+File tree:
+${Array.from(fileHandles.keys()).map(f => '  ' + f).join('\n')}
+`;
+            if (currentActiveFilePath && !isNonTextFile(currentActiveFilePath) && editor) {
+                const code = editor.getValue();
+                if (code.length < 15000) {
+                    context += `\nCurrently opened file: "${currentActiveFilePath}"
+\`\`\`
+${code}
+\`\`\`
+`;
+                } else {
+                    context += `\nCurrently opened file: "${currentActiveFilePath}" (${code.length} characters, too large for full context, first 5000 characters:)
+\`\`\`
+${code.substring(0, 5000)}
+\`\`\`
+`;
+                }
+            }
+
+            if (currentBase64Image) {
+                context += `\nAn image is open: "${currentActiveFilePath}" (Base64 is sent as an image attachment).\n`;
+            }
+
+            if (currentExcelJson) {
+                const jsonStr = JSON.stringify(currentExcelJson);
+                const safeJson = jsonStr.length > 4000 ? jsonStr.substring(0, 4000) + '... [truncated]' : jsonStr;
+                context += `\nOpened Excel file: "${currentActiveFilePath}"
+Data (JSON):\n${safeJson}\n`;
+            }
+
+            if (currentDocxText) {
+                const safeText = currentDocxText.length > 4000 ? currentDocxText.substring(0, 4000) + '... [truncated]' : currentDocxText;
+                context += `\nOpened Word document: "${currentActiveFilePath}"
+Text:\n${safeText}\n`;
+            }
+
+            context += `
+IMPORTANT: If you want to perform file operations, reply EXCLUSIVELY in the following JSON format:
+{
+    "message": "Explanation to the user of what you did",
+    "operations": [
+        { "action": "write_text", "filename": "path/to/file.py", "content": "Complete file content..." },
+        { "action": "modify_excel", "filename": "data.xlsx", "excel_instructions": { "Sheet1": { "A1": "New value", "B2": "42" } } },
+        { "action": "delete_file", "filename": "old-file.txt" },
+        { "action": "rename_file", "filename": "old-name.js", "new_filename": "new-name.js" }
+    ]
+}
+
+If no file operations are necessary (e.g., for questions or explanations), simply reply in normal Markdown.
+Always reply in English.`;
+
+            return context;
+        }
+
+        function updateContextCounter(text) {
+            const chars = text.length;
+            const approxTokens = Math.ceil(chars / 4);
+            document.getElementById('context-counter').textContent = `~${approxTokens.toLocaleString()} Tokens | ${chars.toLocaleString()} Characters`;
+        }
+
+        async function executeAgent() {
+            const promptInput = document.getElementById('user-prompt');
+            const prompt = promptInput.value.trim();
+            if (!prompt || isAgentRunning) return;
+            if (!dirHandle) { alert("Please mount a workspace first!"); return; }
+
+            appendToChat('User', prompt);
+            promptInput.value = '';
+            setAgentRunning(true);
+
+            const apiStyle = getApiStyle();
+            const baseUrl = document.getElementById('api-baseurl').value.replace(/\/+$/, '');
+            const model = getSelectedModel();
+            const apiKey = document.getElementById('api-key').value;
+
+            const systemPrompt = buildSystemPrompt(prompt);
+            updateContextCounter(systemPrompt + conversationHistory.map(m => m.content || '').join(''));
+
+            conversationHistory.push({ role: 'user', content: prompt });
+            if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
+
+            try {
+                let aiResponseText = '';
+
+                if (apiStyle === 'gemini') {
+                    aiResponseText = await callGemini(baseUrl, model, apiKey, systemPrompt);
+                } else if (apiStyle === 'ollama') {
+                    aiResponseText = await callOllama(baseUrl, model, systemPrompt);
+                } else if (apiStyle === 'anthropic') {
+                    aiResponseText = await callAnthropic(baseUrl, model, apiKey, systemPrompt);
+                } else {
+                    // openai-compatible: OpenAI, xAI, Mistral, DeepSeek, Qwen, Kimi, Groq, OpenRouter, LM Studio, Custom
+                    aiResponseText = await callOpenAI(baseUrl, model, apiKey, systemPrompt);
+                }
+
+                conversationHistory.push({ role: 'assistant', content: aiResponseText });
+                await processAgentResponse(aiResponseText);
+
+            } catch (error) {
+                appendToChat('System (Error)', `❌ API Error: ${error.message}`, true);
+                console.error(error);
+            } finally {
+                setAgentRunning(false);
+            }
+        }
+
+        function setAgentRunning(running) {
+            isAgentRunning = running;
+            const btn = document.getElementById('run-btn');
+            if (running) {
+                btn.innerHTML = '<span class="spinner"></span> <span>Thinking...</span>';
+                btn.classList.replace('bg-green-600', 'bg-gray-700');
+                btn.classList.remove('hover:bg-green-500');
+            } else {
+                btn.innerHTML = '<i class="fa-solid fa-rocket"></i> <span>Run</span>';
+                btn.classList.replace('bg-gray-700', 'bg-green-600');
+                btn.classList.add('hover:bg-green-500');
+            }
+        }
+
+        // --- API Caller: Gemini ---
+        async function callGemini(baseUrl, model, apiKey, systemPrompt) {
+            const endpoint = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
+
+            const parts = [{ text: systemPrompt }];
+            if (conversationHistory.length > 1) {
+                const historyText = conversationHistory.slice(0, -1).map(m =>
+                    `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`
+                ).join('\n\n');
+                parts[0].text = systemPrompt + `\n\nPrevious chat history:\n${historyText}\n\nCurrent user message: ${conversationHistory[conversationHistory.length - 1].content}`;
+            }
+
+            if (currentBase64Image) {
+                parts.push({ inline_data: { mime_type: 'image/jpeg', data: currentBase64Image } });
+            }
+
+            const payload = { contents: [{ parts }] };
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error.message);
+            if (!data.candidates || !data.candidates[0]) throw new Error('No response received from the model.');
+            return data.candidates[0].content.parts[0].text;
+        }
+
+        // --- API Caller: Anthropic (Messages API) ---
+        async function callAnthropic(baseUrl, model, apiKey, systemPrompt) {
+            const endpoint = `${baseUrl}/messages`;
+            const headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'anthropic-dangerous-direct-browser-access': 'true'
+            };
+
+            const messages = [];
+            for (const msg of conversationHistory) {
+                if (msg.role === 'user') {
+                    const contentArray = [{ type: 'text', text: msg.content }];
+                    if (msg === conversationHistory[conversationHistory.length - 1] && currentBase64Image) {
+                        contentArray.unshift({
+                            type: 'image',
+                            source: { type: 'base64', media_type: 'image/jpeg', data: currentBase64Image }
+                        });
+                    }
+                    messages.push({ role: 'user', content: contentArray });
+                } else {
+                    messages.push({ role: 'assistant', content: msg.content });
+                }
+            }
+
+            const payload = {
+                model: model,
+                max_tokens: 8192,
+                system: systemPrompt,
+                messages: messages
+            };
+
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+            if (data.content && data.content[0]) return data.content[0].text;
+            throw new Error('No response content from Anthropic.');
+        }
+
+        // --- API Caller: Ollama ---
+        async function callOllama(baseUrl, model, systemPrompt) {
+            const endpoint = `${baseUrl}/api/generate`;
+            const payload = {
+                model: model,
+                prompt: systemPrompt + (conversationHistory.length > 1
+                    ? '\n\nPrevious chat history:\n' + conversationHistory.slice(0, -1).map(m =>
+                        `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`
+                    ).join('\n\n') + '\n\nCurrent user message: ' + conversationHistory[conversationHistory.length - 1].content
+                    : ''),
+                stream: false
+            };
+            if (currentBase64Image) payload.images = [currentBase64Image];
+
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            return data.response;
+        }
+
+        // --- API Caller: OpenAI / Compatible (xAI, Mistral, DeepSeek, Qwen, Kimi, Groq, OpenRouter, LM Studio, Custom) ---
+        async function callOpenAI(baseUrl, model, apiKey, systemPrompt) {
+            const endpoint = `${baseUrl}/chat/completions`;
+            const headers = { 'Content-Type': 'application/json' };
+            if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+            const messages = [
+                { role: 'system', content: systemPrompt }
+            ];
+
+            for (const msg of conversationHistory) {
+                if (msg.role === 'user') {
+                    const contentArray = [{ type: 'text', text: msg.content }];
+                    if (msg === conversationHistory[conversationHistory.length - 1] && currentBase64Image) {
+                        contentArray.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${currentBase64Image}` } });
+                    }
+                    messages.push({ role: 'user', content: contentArray });
+                } else {
+                    messages.push({ role: 'assistant', content: msg.content });
+                }
+            }
+
+            const payload = { model: model, messages: messages, temperature: 0.3 };
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+            return data.choices[0].message.content;
+        }
+
+        // =========================================================
+        //  AGENT RESPONSE PROCESSING
+        // =========================================================
+        async function processAgentResponse(aiResponseText) {
+            const cleanedJson = aiResponseText
+                .replace(/^```json\s*/i, '')
+                .replace(/^```\s*/i, '')
+                .replace(/\s*```$/i, '')
+                .trim();
+
+            let parsed = null;
+            try {
+                parsed = JSON.parse(cleanedJson);
+            } catch (e) {
+                // Not JSON — treat as plain Markdown response
+                appendToChat('BrowserForge', aiResponseText);
+                return;
+            }
+
+            if (parsed.message) {
+                appendToChat('BrowserForge', parsed.message);
+            }
+
+            if (parsed.operations && Array.isArray(parsed.operations)) {
+                for (const op of parsed.operations) {
+                    try {
+                        if (op.action === 'write_text') {
+                            const handle = await getDeepFileHandle(dirHandle, op.filename, true);
+                            const writable = await handle.createWritable();
+                            await writable.write(op.content);
+                            await writable.close();
+                            appendToChat('System', `✓ Written: ${op.filename}`, true);
+
+                            if (currentActiveFilePath === op.filename && editor) {
+                                editor.setValue(op.content);
+                                showSavedStatus();
+                            }
+
+                        } else if (op.action === 'delete_file') {
+                            try {
+                                const parts = op.filename.split('/');
+                                let parentDir = dirHandle;
+                                for (let i = 0; i < parts.length - 1; i++) {
+                                    parentDir = await parentDir.getDirectoryHandle(parts[i]);
+                                }
+                                await parentDir.removeEntry(parts[parts.length - 1]);
+                                appendToChat('System', `✓ Deleted: ${op.filename}`, true);
+                            } catch (err) {
+                                appendToChat('System (Error)', `Delete failed for ${op.filename}: ${err.message}`, true);
+                            }
+
+                        } else if (op.action === 'rename_file') {
+                            try {
+                                const oldHandle = await getDeepFileHandle(dirHandle, op.filename, false);
+                                const oldFile = await oldHandle.getFile();
+                                const content = await oldFile.arrayBuffer();
+
+                                const newHandle = await getDeepFileHandle(dirHandle, op.new_filename, true);
+                                const writable = await newHandle.createWritable();
+                                await writable.write(content);
+                                await writable.close();
+
+                                const parts = op.filename.split('/');
+                                let parentDir = dirHandle;
+                                for (let i = 0; i < parts.length - 1; i++) {
+                                    parentDir = await parentDir.getDirectoryHandle(parts[i]);
+                                }
+                                await parentDir.removeEntry(parts[parts.length - 1]);
+
+                                appendToChat('System', `✓ Renamed: ${op.filename} → ${op.new_filename}`, true);
+                            } catch (err) {
+                                appendToChat('System (Error)', `Rename failed: ${err.message}`, true);
+                            }
+
+                        } else if (op.action === 'modify_excel') {
+                            try {
+                                const handle = await getDeepFileHandle(dirHandle, op.filename, false);
+                                const file = await handle.getFile();
+                                const arrayBuffer = await file.arrayBuffer();
+                                const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+
+                                for (const [sheetName, cells] of Object.entries(op.excel_instructions || {})) {
+                                    let sheet = workbook.Sheets[sheetName];
+                                    if (!sheet) {
+                                        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([[]]), sheetName);
+                                        sheet = workbook.Sheets[sheetName];
+                                    }
+                                    for (const [cellRef, value] of Object.entries(cells)) {
+                                        sheet[cellRef] = { v: value, t: isNaN(Number(value)) ? 's' : 'n' };
+                                    }
+                                    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+                                    for (const cellRef of Object.keys(cells)) {
+                                        const cell = XLSX.utils.decode_cell(cellRef);
+                                        if (cell.r > range.e.r) range.e.r = cell.r;
+                                        if (cell.c > range.e.c) range.e.c = cell.c;
+                                    }
+                                    sheet['!ref'] = XLSX.utils.encode_range(range);
+                                }
+
+                                const output = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+                                const writable = await handle.createWritable();
+                                await writable.write(new Uint8Array(output));
+                                await writable.close();
+
+                                appendToChat('System', `✓ Excel modified: ${op.filename}`, true);
+                            } catch (err) {
+                                appendToChat('System (Error)', `Excel modify failed: ${err.message}`, true);
+                            }
+
+                        } else {
+                            appendToChat('System', `⚠️ Unknown action: ${op.action}`, true);
+                        }
+                    } catch (err) {
+                        appendToChat('System (Error)', `Operation failed (${op.action}): ${err.message}`, true);
+                    }
+                }
+
+                await refreshFileTree();
+            }
+        }
+    </script>
+</body>
+</html>
